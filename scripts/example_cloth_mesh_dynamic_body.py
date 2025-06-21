@@ -135,7 +135,7 @@ class Example:
     ):
         self.integrator_type = integrator
 
-        fps = 30
+        fps = 60
         self.sim_substeps = 16
         self.frame_dt = 1.0 / fps
         self.sim_dt = self.frame_dt / self.sim_substeps
@@ -156,7 +156,7 @@ class Example:
         tree = spatial.KDTree(np.array(vertices))
         dist, idx = tree.query(boundary_verts, k=1, p=2)
         pinning_mask = np.array([1]*len(vertices))
-        # pinning_mask[idx] = 0
+        pinning_mask[idx] = 0
         pinning_mask = pinning_mask.tolist()
         pinning_mask = wp.array(pinning_mask, dtype=wp.uint32)
 
@@ -219,7 +219,7 @@ class Example:
         self.body_points_array_set = np.zeros((self.set_size, self.body_points_array.shape[0],3))
         self.body_points_array_set[0] = body_points
         for i in range(1, self.set_size):
-            self.body_points_array_set[i] = self.body_points_array_set[i-1] + 0.1
+            self.body_points_array_set[i] = self.body_points_array_set[i-1] + np.array([0.0, 0.0, 0.1])
         self.body_points_array_set = wp.array(self.body_points_array_set, dtype=wp.vec3f)
 
         self.model.particle_flags = pinning_mask
@@ -364,6 +364,11 @@ if __name__ == "__main__":
         default=0.1,
         help="density of cloth particles.",
     )
+    parser.add_argument(
+        "--render_all",
+        action=argparse.BooleanOptionalAction,
+        help="whether to render all frames or not",
+    )
 
     args = parser.parse_known_args()[0]
 
@@ -393,8 +398,12 @@ if __name__ == "__main__":
 
         for _i in range(args.num_frames):
             example.step(step_num=_i)
-            example.render()
+            if args.render_all:
+                example.render()
             print(f"Frame {_i+1}/{args.num_frames}")
+
+        if not args.render_all: # render the last (recent) frame
+            example.render()
 
         frame_times = example.profiler["step"]
         print("\nAverage frame sim time: {:.2f} ms".format(sum(frame_times) / len(frame_times)))

@@ -108,14 +108,6 @@ def load_obj_mesh(file_path):
 
     return vertices, indices
 
-# Kernel to apply a sine wave deformation to the body mesh
-@wp.kernel
-def update_body_mesh_kernel(
-    points: wp.array(dtype=wp.vec3)
-):
-    tid = wp.tid()
-    points[tid] = points[tid] + wp.vec3(0.5, 0.0, 0.0)
-
 
 class Example:
     def __init__(
@@ -135,7 +127,7 @@ class Example:
     ):
         self.integrator_type = integrator
 
-        fps = 30
+        fps = 60
         self.sim_substeps = 16
         self.frame_dt = 1.0 / fps
         self.sim_dt = self.frame_dt / self.sim_substeps
@@ -213,14 +205,6 @@ class Example:
             builder.color()
 
         self.model = builder.finalize()
-        self.body_points_array = self.model.shape_geo_src[self.body_mesh_id].mesh.points
-
-        self.set_size = total_steps
-        self.body_points_array_set = np.zeros((self.set_size, self.body_points_array.shape[0],3))
-        self.body_points_array_set[0] = body_points
-        for i in range(1, self.set_size):
-            self.body_points_array_set[i] = self.body_points_array_set[i-1] + 0.1
-        self.body_points_array_set = wp.array(self.body_points_array_set, dtype=wp.vec3f)
 
         self.model.particle_flags = pinning_mask
         self.model.ground = False  # Enable ground plane for collision
@@ -255,29 +239,15 @@ class Example:
                 self.simulate()
             self.graph = capture.graph
 
-    def update_body_mesh(self, step_num):
-        new_body_points_array = self.body_points_array_set[step_num]
-        # kernel call to parallely update the contents of new_body_points_array in-place
-        wp.launch(
-            kernel=update_body_mesh_kernel,
-            dim=len(new_body_points_array),
-            inputs=[new_body_points_array],
-            )
-        self.model.shape_geo_src[self.body_mesh_id].mesh.points = new_body_points_array
-
     def simulate(self):
         wp.sim.collide(self.model, self.state_0)
         for _ in range(self.sim_substeps):
             self.state_0.clear_forces()
-
             self.integrator.simulate(self.model, self.state_0, self.state_1, self.sim_dt)
-
             # swap states
             (self.state_0, self.state_1) = (self.state_1, self.state_0)
 
-    def step(self, step_num):
-        # Update the body mesh before simulation step
-        self.update_body_mesh(step_num)
+    def step(self, step_num=None):
         with wp.ScopedTimer("step", dict=self.profiler):
             if self.use_cuda_graph:
                 wp.capture_launch(self.graph)
@@ -364,6 +334,11 @@ if __name__ == "__main__":
         default=0.1,
         help="density of cloth particles.",
     )
+    parser.add_argument(
+        "--render_all",
+        action=argparse.BooleanOptionalAction,
+        help="whether to render all frames or not",
+    )
 
     args = parser.parse_known_args()[0]
 
@@ -393,8 +368,12 @@ if __name__ == "__main__":
 
         for _i in range(args.num_frames):
             example.step(step_num=_i)
-            example.render()
+            if args.render_all:
+                example.render()
             print(f"Frame {_i+1}/{args.num_frames}")
+
+        if not args.render_all: # render the last (recent) frame
+            example.render()
 
         frame_times = example.profiler["step"]
         print("\nAverage frame sim time: {:.2f} ms".format(sum(frame_times) / len(frame_times)))
