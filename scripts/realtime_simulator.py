@@ -135,7 +135,7 @@ class Example:
         tree = spatial.KDTree(np.array(self.cloth_vertices))
         dist, idx = tree.query(boundary_verts, k=1, p=2)
         pinning_mask = np.array([1]*len(self.cloth_vertices))
-        pinning_mask[idx] = 0
+        # pinning_mask[idx] = 0
         pinning_mask = pinning_mask.tolist()
         self.pinning_mask = wp.array(pinning_mask, dtype=wp.uint32)
 
@@ -154,7 +154,7 @@ class Example:
             add_springs=True,  # Add triangle bending springs
             spring_ke=5.0e3,
             spring_kd=10.0,
-            particle_radius=0.05,
+            particle_radius=0.3,
             density=1.0,  # Use the provided density as density
             tri_ke=1.0e4,  # Triangle stretch stiffness
             tri_ka=1.0e4,  # Triangle area stiffness
@@ -198,7 +198,7 @@ class Example:
         self.body_points_array_set = np.zeros((self.set_size, self.body_points_array.shape[0],3))
         self.body_points_array_set[0] = body_points
         for i in range(1, self.set_size):
-            self.body_points_array_set[i] = self.body_points_array_set[i-1] + np.array([[0.0, 0.03, 0.0]])
+            self.body_points_array_set[i] = self.body_points_array_set[i-1] + np.array([[0.0, 0.0, 0.0]])
 
         self.model.particle_flags = self.pinning_mask
         self.model.ground = False  # Enable ground plane for collision

@@ -153,7 +153,7 @@ class Example:
             add_springs=True,  # Add triangle bending springs
             spring_ke=5.0e3,
             spring_kd=10.0,
-            particle_radius=0.05,
+            particle_radius=0.3,
             density=1.0,  # Use the provided density as density
             tri_ke=1.0e4,  # Triangle stretch stiffness
             tri_ka=1.0e4,  # Triangle area stiffness
