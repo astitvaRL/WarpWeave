@@ -148,7 +148,7 @@ class Example:
         tree = spatial.KDTree(np.array(vertices))
         dist, idx = tree.query(boundary_verts, k=1, p=2)
         pinning_mask = np.array([1]*len(vertices))
-        # pinning_mask[idx] = 0
+        pinning_mask[idx] = 0
         pinning_mask = pinning_mask.tolist()
         pinning_mask = wp.array(pinning_mask, dtype=wp.uint32)
 
@@ -335,10 +335,12 @@ if __name__ == "__main__":
         help="density of cloth particles.",
     )
     parser.add_argument(
-        "--render_all",
-        action=argparse.BooleanOptionalAction,
-        help="whether to render all frames or not",
+        "--render_freq",
+        type=int,
+        default=0,
+        help="interval between renders, 1 for rendering all frames, 0 for no render",
     )
+
 
     args = parser.parse_known_args()[0]
 
@@ -368,11 +370,13 @@ if __name__ == "__main__":
 
         for _i in range(args.num_frames):
             example.step(step_num=_i)
-            if args.render_all:
-                example.render()
+            if args.render_freq>0:
+                if _i%args.render_freq == 0:
+                    print("rendering frame")
+                    example.render()
             print(f"Frame {_i+1}/{args.num_frames}")
 
-        if not args.render_all: # render the last (recent) frame
+        if args.render_freq==0: # render the latest (last) frame
             example.render()
 
         frame_times = example.profiler["step"]

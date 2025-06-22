@@ -110,12 +110,13 @@ def load_obj_mesh(file_path):
 
 # Kernel to apply a sine wave deformation to the body mesh
 @wp.kernel
-def update_body_mesh_kernel(
-    points: wp.array(dtype=wp.vec3)
+def update_cloth_pins_kernel(
+    particles: wp.array(dtype=wp.vec3f),
+    particle_flags: wp.array(dtype=wp.uint32)
 ):
     tid = wp.tid()
-    points[tid] = points[tid] + wp.vec3(0.5, 0.0, 0.0)
-
+    if particle_flags[tid] == 0:
+        particles[tid] = particles[tid] + wp.vec3f(0.0, 0.0, 0.1)
 
 class Example:
     def __init__(
@@ -141,6 +142,8 @@ class Example:
         self.sim_dt = self.frame_dt / self.sim_substeps
         self.sim_time = 0.0
         self.profiler = {}
+        self.total_steps = total_steps
+        self.update_start_step_num = 300
 
         builder = wp.sim.ModelBuilder()
 
@@ -158,7 +161,7 @@ class Example:
         pinning_mask = np.array([1]*len(vertices))
         pinning_mask[idx] = 0
         pinning_mask = pinning_mask.tolist()
-        pinning_mask = wp.array(pinning_mask, dtype=wp.uint32)
+        self.pinning_mask = wp.array(pinning_mask, dtype=wp.uint32)
 
         # Scale vertices if needed
         if scale != 1.0:
@@ -215,20 +218,18 @@ class Example:
         self.model = builder.finalize()
         self.body_points_array = self.model.shape_geo_src[self.body_mesh_id].mesh.points
 
-        self.set_size = total_steps
+        self.set_size = self.total_steps - self.update_start_step_num
         self.body_points_array_set = np.zeros((self.set_size, self.body_points_array.shape[0],3))
         self.body_points_array_set[0] = body_points
         for i in range(1, self.set_size):
-            self.body_points_array_set[i] = self.body_points_array_set[i-1] + np.array([0.0, 0.0, 0.1])
-        self.body_points_array_set = wp.array(self.body_points_array_set, dtype=wp.vec3f)
+            self.body_points_array_set[i] = self.body_points_array_set[i-1] + np.array([[0.0, 0.0, 0.1]])
 
-        self.model.particle_flags = pinning_mask
+        self.model.particle_flags = self.pinning_mask
         self.model.ground = False  # Enable ground plane for collision
         self.model.enable_tri_collisions = True
         self.model.enable_particle_particle_collisions = True
         self.model.enable_triangle_particle_collisions = True
         self.model.enable_edge_edge_collisions = True
-
 
         if self.integrator_type == IntegratorType.EULER:
             self.integrator = wp.sim.SemiImplicitIntegrator()
@@ -256,14 +257,17 @@ class Example:
             self.graph = capture.graph
 
     def update_body_mesh(self, step_num):
-        new_body_points_array = self.body_points_array_set[step_num]
-        # kernel call to parallely update the contents of new_body_points_array in-place
-        wp.launch(
-            kernel=update_body_mesh_kernel,
-            dim=len(new_body_points_array),
-            inputs=[new_body_points_array],
+        # indexing into numpy array set first and then convert to wp.array, as we can't index into a wp.array set directly
+        self.model.shape_geo_src[self.body_mesh_id].mesh.points = wp.array(self.body_points_array_set[step_num], dtype=wp.vec3f)
+
+    def update_cloth_pins(self, step_num):
+         wp.launch(
+            kernel=update_cloth_pins_kernel,
+            dim=len(self.state_0.particle_q),
+            inputs=[
+                self.state_0.particle_q,
+                self.model.particle_flags]
             )
-        self.model.shape_geo_src[self.body_mesh_id].mesh.points = new_body_points_array
 
     def simulate(self):
         wp.sim.collide(self.model, self.state_0)
@@ -276,8 +280,11 @@ class Example:
             (self.state_0, self.state_1) = (self.state_1, self.state_0)
 
     def step(self, step_num):
-        # Update the body mesh before simulation step
-        self.update_body_mesh(step_num)
+        if step_num > self.update_start_step_num:
+            step_offset = step_num - self.update_start_step_num
+            # Update the body mesh and cloth pins before simulation step
+            self.update_body_mesh(step_offset)
+            self.update_cloth_pins(step_offset)
         with wp.ScopedTimer("step", dict=self.profiler):
             if self.use_cuda_graph:
                 wp.capture_launch(self.graph)
@@ -292,6 +299,11 @@ class Example:
         with wp.ScopedTimer("render"):
             self.renderer.begin_frame(self.sim_time)
             self.renderer.render(self.state_0)
+            self.renderer.render_mesh(
+                name = "body",
+                points = self.model.shape_geo_src[self.body_mesh_id].mesh.points.numpy(),
+                indices = self.model.shape_geo_src[self.body_mesh_id].mesh.indices.numpy()
+            )
             self.renderer.end_frame()
 
 
@@ -365,9 +377,10 @@ if __name__ == "__main__":
         help="density of cloth particles.",
     )
     parser.add_argument(
-        "--render_all",
-        action=argparse.BooleanOptionalAction,
-        help="whether to render all frames or not",
+        "--render_freq",
+        type=int,
+        default=0,
+        help="interval between renders, 1 for rendering all frames, 0 for no render",
     )
 
     args = parser.parse_known_args()[0]
@@ -398,11 +411,13 @@ if __name__ == "__main__":
 
         for _i in range(args.num_frames):
             example.step(step_num=_i)
-            if args.render_all:
-                example.render()
+            if args.render_freq>0:
+                if _i%args.render_freq == 0:
+                    print("rendering frame")
+                    example.render()
             print(f"Frame {_i+1}/{args.num_frames}")
 
-        if not args.render_all: # render the last (recent) frame
+        if args.render_freq==0: # render the latest (last) frame
             example.render()
 
         frame_times = example.profiler["step"]
