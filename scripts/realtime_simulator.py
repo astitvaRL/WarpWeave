@@ -135,7 +135,7 @@ class Example:
         tree = spatial.KDTree(np.array(self.cloth_vertices))
         dist, idx = tree.query(boundary_verts, k=1, p=2)
         pinning_mask = np.array([1]*len(self.cloth_vertices))
-        # pinning_mask[idx] = 0
+        pinning_mask[idx] = 0
         pinning_mask = pinning_mask.tolist()
         self.pinning_mask = wp.array(pinning_mask, dtype=wp.uint32)
 
@@ -198,7 +198,7 @@ class Example:
         self.body_points_array_set = np.zeros((self.set_size, self.body_points_array.shape[0],3))
         self.body_points_array_set[0] = body_points
         for i in range(1, self.set_size):
-            self.body_points_array_set[i] = self.body_points_array_set[i-1] + np.array([[0.0, 0.0, 0.0]])
+            self.body_points_array_set[i] = self.body_points_array_set[i-1] + np.array([[0.0, 0.03, 0.0]])
 
         self.model.particle_flags = self.pinning_mask
         self.model.ground = False  # Enable ground plane for collision
@@ -384,12 +384,17 @@ if __name__ == "__main__":
         while viewer.is_open:
             for _i in range(args.num_frames):
                 example.step(step_num=_i)
-                # example.render()
-                verts = example.state_0.particle_q.numpy()
-                faces = np.array(example.cloth_indices).reshape(-1,3)
-                viewer.set_mesh(v=verts, f=faces, object_name="cloth")
+                cloth_verts = example.state_0.particle_q.numpy()
+                cloth_faces = np.array(example.cloth_indices).reshape(-1,3)
+                cloth_colors = np.ones_like(cloth_verts) * np.array([0.3, 0.5, 0.55])
+                body_verts = example.model.shape_geo_src[example.body_mesh_id].mesh.points.numpy()
+                body_faces = example.model.shape_geo_src[example.body_mesh_id].mesh.indices.numpy().reshape(-1,3)
+                body_colors = np.ones_like(body_verts) * np.array([0.3, 0.3, 0.3])
+                viewer.set_mesh(v=cloth_verts, f=cloth_faces, c=cloth_colors, object_name="cloth")
+                viewer.set_mesh(v=body_verts, f=body_faces, c=body_colors, object_name="body")
 
-        example.render() # so save the last frame
+        # save the final mesh
+        example.render()
 
         frame_times = example.profiler["step"]
         print("\nAverage frame sim time: {:.2f} ms".format(sum(frame_times) / len(frame_times)))
