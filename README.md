@@ -1,5 +1,5 @@
 # WarpWeave
-### Realtime Garment Simulator + Viewer using NVIDIA-Warp & UMBRA.
+### Python-based Realtime Garment Simulator + Viewer built using NVIDIA-Warp & UMBRA.
 
 
 
