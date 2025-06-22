@@ -1,5 +1,5 @@
 # WarpWeave
-### Realtime Garment Simulation + Viewer using NVIDIA's warp framework & Umbra.
+### Realtime Garment Simulator + Viewer using NVIDIA's warp framework & Umbra.
 
 
 
