@@ -135,7 +135,7 @@ class Example:
         tree = spatial.KDTree(np.array(self.cloth_vertices))
         dist, idx = tree.query(boundary_verts, k=1, p=2)
         pinning_mask = np.array([1]*len(self.cloth_vertices))
-        # pinning_mask[idx] = 0
+        pinning_mask[idx] = 0
         pinning_mask = pinning_mask.tolist()
         self.pinning_mask = wp.array(pinning_mask, dtype=wp.uint32)
 
@@ -392,6 +392,8 @@ if __name__ == "__main__":
                 body_colors = np.ones_like(body_verts) * np.array([0.3, 0.3, 0.3])
                 viewer.set_mesh(v=cloth_verts, f=cloth_faces, c=cloth_colors, object_name="cloth")
                 viewer.set_mesh(v=body_verts, f=body_faces, c=body_colors, object_name="body")
+            if _i == args.num_frames-1:
+                break
 
         # save the final mesh
         example.render()
