@@ -109,6 +109,8 @@ class Example:
         body_rotation=wp.quat_identity(),
         density=0.1,  # density for cloth mesh
         total_steps=None,
+        pinning_mask=None, # list of 0s and 1s, 0 if pinning, 1 if not pinning
+        estimate_pinning_mask=False, # if True, estimate pinning mask from boundary vertices
     ):
         self.integrator_type = integrator
 
@@ -119,7 +121,6 @@ class Example:
         self.sim_time = 0.0
         self.profiler = {}
         self.total_steps = total_steps
-        self.update_start_step_num = 300
 
         builder = wp.sim.ModelBuilder()
 
@@ -130,13 +131,19 @@ class Example:
         self.cloth_vertices, self.cloth_indices = load_obj_mesh(obj_path)
         print("Cloth mesh loaded successfully!")
 
-        # estimate pinning vertices
-        boundary_verts = get_boundary_verts_pos(obj_path)
-        tree = spatial.KDTree(np.array(self.cloth_vertices))
-        dist, idx = tree.query(boundary_verts, k=1, p=2)
-        pinning_mask = np.array([1]*len(self.cloth_vertices))
-        pinning_mask[idx] = 0
-        pinning_mask = pinning_mask.tolist()
+        self.pinning_mask = pinning_mask
+
+        if self.pinning_mask is None and estimate_pinning_mask:
+            # estimate pinning vertices
+            boundary_verts = get_boundary_verts_pos(obj_path)
+            tree = spatial.KDTree(np.array(self.cloth_vertices))
+            dist, idx = tree.query(boundary_verts, k=1, p=2)
+            pinning_mask = np.array([1]*len(self.cloth_vertices))
+            pinning_mask[idx] = 0
+            pinning_mask = pinning_mask.tolist()
+        else:
+            pinning_mask = np.array([1]*len(self.cloth_vertices)).tolist()
+
         self.pinning_mask = wp.array(pinning_mask, dtype=wp.uint32)
 
         # Scale vertices if needed
@@ -194,12 +201,6 @@ class Example:
         self.model = builder.finalize()
         self.body_points_array = self.model.shape_geo_src[self.body_mesh_id].mesh.points
 
-        self.set_size = self.total_steps - self.update_start_step_num
-        self.body_points_array_set = np.zeros((self.set_size, self.body_points_array.shape[0],3))
-        self.body_points_array_set[0] = body_points
-        for i in range(1, self.set_size):
-            self.body_points_array_set[i] = self.body_points_array_set[i-1] + np.array([[0.0, 0.0, 0.0]])
-
         self.model.particle_flags = self.pinning_mask
         self.model.ground = False  # Enable ground plane for collision
         self.model.enable_tri_collisions = True
@@ -232,19 +233,6 @@ class Example:
                 self.simulate()
             self.graph = capture.graph
 
-    def update_body_mesh(self, step_num):
-        # indexing into numpy array set first and then convert to wp.array, as we can't index into a wp.array set directly
-        self.model.shape_geo_src[self.body_mesh_id].mesh.points = wp.array(self.body_points_array_set[step_num], dtype=wp.vec3f)
-
-    def update_cloth_pins(self, step_num):
-         wp.launch(
-            kernel=update_cloth_pins_kernel,
-            dim=len(self.state_0.particle_q),
-            inputs=[
-                self.state_0.particle_q,
-                self.model.particle_flags]
-            )
-
     def simulate(self):
         wp.sim.collide(self.model, self.state_0)
         for _ in range(self.sim_substeps):
@@ -256,11 +244,6 @@ class Example:
             (self.state_0, self.state_1) = (self.state_1, self.state_0)
 
     def step(self, step_num):
-        if step_num > self.update_start_step_num:
-            step_offset = step_num - self.update_start_step_num
-            # Update the body mesh and cloth pins before simulation step
-            self.update_body_mesh(step_offset)
-            self.update_cloth_pins(step_offset)
         with wp.ScopedTimer("step", dict=self.profiler):
             if self.use_cuda_graph:
                 wp.capture_launch(self.graph)
@@ -376,12 +359,14 @@ if __name__ == "__main__":
             position=wp.vec3(args.position[0], args.position[1], args.position[2]),
             body_position=wp.vec3(args.body_position[0], args.body_position[1], args.body_position[2]),
             density=args.density,
-            total_steps=args.num_frames
+            total_steps=args.num_frames,
+            estimate_pinning_mask=False
         )
 
         viewer = MeshViewer()
 
         while viewer.is_open:
+            time.sleep(3) # wait while the viewer window is being initialized
             for _i in range(args.num_frames):
                 example.step(step_num=_i)
                 cloth_verts = example.state_0.particle_q.numpy()
