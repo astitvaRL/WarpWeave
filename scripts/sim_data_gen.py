@@ -160,7 +160,26 @@ class DataSimulator:
         # Scale vertices if needed
         self.cloth_vertices = [wp.vec3(v[0] * scale, v[1] * scale, v[2] * scale) for v in self.cloth_vertices]
 
-        # Add cloth mesh to the simulation
+        # # # Add cloth mesh to the simulation
+        # builder.add_cloth_mesh(
+        #     pos=position,
+        #     rot=rotation,
+        #     scale=1.0,  # Already scaled the vertices if needed
+        #     vertices=self.cloth_vertices,
+        #     indices=self.cloth_indices,
+        #     vel=wp.vec3(0.0, 0.0, 0.0),
+        #     add_springs=True,  # Add triangle bending springs
+        #     spring_ke=1.2e3,
+        #     spring_kd=1.0,
+        #     particle_radius=0.5,
+        #     density=0.5,  # Use the provided density as density
+        #     tri_ke=1.0e-2,  # Triangle stretch stiffness
+        #     tri_ka=1.0e6-2,  # Triangle area stiffness
+        #     tri_kd=1.0e-5,  # Triangle damping
+        #     edge_ke=1.0e-1,   # Edge stretch stiffness
+        #     edge_kd=10.0,   # Edge bending stiffness
+        # )
+
         builder.add_cloth_mesh(
             pos=position,
             rot=rotation,
@@ -169,15 +188,15 @@ class DataSimulator:
             indices=self.cloth_indices,
             vel=wp.vec3(0.0, 0.0, 0.0),
             add_springs=True,  # Add triangle bending springs
-            spring_ke=1.0e3,
+            spring_ke=1.2e3,
             spring_kd=10.0,
             particle_radius=0.5,
             density=1.0,  # Use the provided density as density
-            tri_ke=1.0e2,  # Triangle stretch stiffness
-            tri_ka=1.0e2,  # Triangle area stiffness
+            tri_ke=1.0,  # Triangle stretch stiffness
+            tri_ka=1.0,  # Triangle area stiffness
             tri_kd=10.0,  # Triangle damping
             edge_ke=1.0,   # Edge stretch stiffness
-            edge_kd=10,   # Edge bending stiffness
+            edge_kd=10.0,   # Edge bending stiffness
         )
 
 
@@ -195,9 +214,6 @@ class DataSimulator:
             pos=body_position,
             rot=body_rotation,
             scale=wp.vec3(1.0, 1.0, 1.0),  # Already scaled the vertices if needed
-            ke=1.0e2,
-            kd=1.0e2,
-            kf=1.0e1,
         )
 
         if self.integrator_type == IntegratorType.VBD:
@@ -212,6 +228,13 @@ class DataSimulator:
         self.model.enable_particle_particle_collisions = True
         self.model.enable_triangle_particle_collisions = True
         self.model.enable_edge_edge_collisions = True
+
+        # set up contact query and contact detection distances
+        self.model.soft_contact_ke = 1.0e5
+        self.model.soft_contact_kd = 1.0e-6
+        self.model.soft_contact_mu = 0.2
+        self.model.soft_contact_radius = 0.5
+        self.model.soft_contact_margin = 0.5
 
         if self.integrator_type == IntegratorType.EULER:
             self.integrator = wp.sim.SemiImplicitIntegrator()
@@ -228,7 +251,7 @@ class DataSimulator:
         self.state_1 = self.model.state()
 
         if stage_path:
-            self.renderer = wp.sim.render.SimRenderer(self.model, stage_path, scaling=40.0)
+            self.renderer = wp.sim.render.SimRenderer(self.model, stage_path, scaling=100.0)
         else:
             self.renderer = None
 
@@ -287,6 +310,34 @@ class DataSimulator:
                 indices = self.model.shape_geo_src[self.body_mesh_id].mesh.indices.numpy()
             )
             self.renderer.end_frame()
+
+    def cleanup(self):
+        """
+        Clean up resources used by the simulator.
+        Call this method when you're done with the simulator to free up resources.
+        """
+        # Release CUDA graph if it exists
+        if hasattr(self, 'graph') and self.graph is not None:
+            self.graph = None
+
+        # Save and close the renderer if it exists
+        if self.renderer is not None:
+            try:
+                self.renderer.save()
+            except Exception as e:
+                print(f"Warning: Could not save renderer: {e}")
+            self.renderer = None
+
+        # Clear large data arrays
+        if hasattr(self, 'body_points_array_set'):
+            self.body_points_array_set = None
+
+        # Force garbage collection to clean up GPU memory
+        import gc
+        gc.collect()
+
+        # Explicitly synchronize the device to ensure all operations are complete
+        wp.synchronize()
 
 
 if __name__ == "__main__":
@@ -364,13 +415,16 @@ if __name__ == "__main__":
     body_verts, body_faces, body_indices = anim.get_body_mesh()
     cloth_verts, cloth_faces, cloth_indices = anim.get_cloth_mesh()
 
+    # viewer = MeshViewer()
 
     for pose_idx in range(len(body_points_anim_data)):
-        body_points_array_set = body_points_anim_data[100]
+
+        print("Simulating pose: ", pose_idx)
+        body_points_array_set = body_points_anim_data[pose_idx]
 
         # further interpolate the body points array set by linearly interpolating n_interp steps between each pose
         num_poses, num_points, num_dims = body_points_array_set.shape
-        n_interp = 300
+        n_interp = 2000
         interpolated_body_points_array_set = np.zeros((n_interp, num_points, num_dims))
         for i in range(num_points):
             for j in range(num_dims):
@@ -381,16 +435,18 @@ if __name__ == "__main__":
                 )
         body_points_array_set = interpolated_body_points_array_set
 
+        print(body_points_array_set.shape)
+
 
         with wp.ScopedDevice(args.device):
             full_stage_path = os.path.join(args.out_dir, args.stage_path.split('.')[0] + f"_{pose_idx}.usd")
             datasim = DataSimulator(
-                body_verts=body_verts,
-                body_faces=body_faces,
-                body_indices=body_indices,
-                cloth_verts=cloth_verts,
-                cloth_faces=cloth_faces,
-                cloth_indices=cloth_indices,
+                body_verts=body_verts.copy(),
+                body_faces=body_faces.copy(),
+                body_indices=body_indices.copy(),
+                cloth_verts=cloth_verts.copy(),
+                cloth_faces=cloth_faces.copy(),
+                cloth_indices=cloth_indices.copy(),
                 body_points_array_set=body_points_array_set,
                 stage_path=full_stage_path,
                 integrator=args.integrator,
@@ -399,36 +455,33 @@ if __name__ == "__main__":
                 position=wp.vec3(args.position[0], args.position[1], args.position[2]),
                 body_position=wp.vec3(args.body_position[0], args.body_position[1], args.body_position[2]),
                 density=args.density,
-                update_start_step_num=300,
-                final_relax_steps=3000
-            )
-
-            viewer = MeshViewer()
-
-            # while viewer.is_open:
-            # for _i in range(len(body_points_array_set)):
+                update_start_step_num=100,
+                final_relax_steps=10
+                )
             for _i in range(datasim.update_start_step_num + len(body_points_array_set) + datasim.final_relax_steps):
                 datasim.step(step_num=_i)
-                cloth_verts = datasim.state_0.particle_q.numpy()
-                cloth_faces = np.array(datasim.cloth_indices).reshape(-1,3)
-                cloth_colors = np.ones_like(cloth_verts) * np.array([0.3, 0.5, 0.55])
-                body_verts = datasim.model.shape_geo_src[datasim.body_mesh_id].mesh.points.numpy()
-                body_faces = datasim.model.shape_geo_src[datasim.body_mesh_id].mesh.indices.numpy().reshape(-1,3)
-                body_colors = np.ones_like(body_verts) * np.array([0.3, 0.3, 0.3])
-                viewer.set_mesh(v=cloth_verts, f=cloth_faces, c=cloth_colors, object_name="cloth")
-                viewer.set_mesh(v=body_verts, f=body_faces, c=body_colors, object_name="body")
+                # cloth_verts = datasim.state_0.particle_q.numpy()
+                # cloth_faces = np.array(datasim.cloth_indices).reshape(-1,3)
+                # cloth_colors = np.ones_like(cloth_verts) * np.array([0.3, 0.5, 0.55])
+                # body_verts = datasim.model.shape_geo_src[datasim.body_mesh_id].mesh.points.numpy()
+                # body_faces = datasim.model.shape_geo_src[datasim.body_mesh_id].mesh.indices.numpy().reshape(-1,3)
+                # body_colors = np.ones_like(body_verts) * np.array([0.3, 0.3, 0.3])
+                # viewer.set_mesh(v=cloth_verts, f=cloth_faces, c=cloth_colors, object_name="cloth")
+                # viewer.set_mesh(v=body_verts, f=body_faces, c=body_colors, object_name="body")
                 print(f"Frame {_i+1}")
-            # if _i == args.num_frames-1:
-            #     break
-
+            datasim.render()
+            datasim.renderer.save()
+            datasim.cleanup()
+            del datasim
             # save the final mesh
-            # datasim.render()
-            # datasim.renderer.save()
 
-            breakpoint()
+
+            # breakpoint()
 
             # frame_times = datasim.profiler["step"]
             # print("\nAverage frame sim time: {:.2f} ms".format(sum(frame_times) / len(frame_times)))
 
             # if datasim.renderer:
             #     datasim.renderer.save()
+        # viewer.clear()
+        # time.sleep(5)
