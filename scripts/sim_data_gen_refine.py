@@ -192,7 +192,7 @@ class DataSimulator:
             indices=self.cloth_indices,
             vel=wp.vec3(0.0, 0.0, 0.0),
             add_springs=True,  # Add triangle bending springs
-            spring_ke=1.2e3,
+            spring_ke=5.0e3,
             spring_kd=10.0,
             particle_radius=0.5,
             density=1.0,  # Use the provided density as density
@@ -410,37 +410,39 @@ if __name__ == "__main__":
     if args.out_dir and not os.path.exists(args.out_dir):
         os.makedirs(args.out_dir)
 
-    # prepare animation data
-    load_dir = "D:\\Simulation\\hermes\\hermes_local_data\\interpolated_data\\"
+    # prepare existing simulation data
+    usd_load_dir = "D:\\Simulation\\DATA\\PhysRig\\skirt\\usd\\"
+    usd_files = os.listdir(usd_load_dir)
+    sim_data = dict()
+    for usd_filename in usd_files:
+        stage = Usd.Stage.Open(f'{usd_load_dir}\\{usd_filename}')
+        for prim in stage.TraverseAll():
+            if prim.GetPrimPath().name.endswith("surface"):
+                geomesh = UsdGeom.Mesh(prim)
+                timesamples = geomesh.GetPointsAttr().GetTimeSamples()
+                maxtime = max(timesamples)
+                c_verts = np.array(geomesh.GetPointsAttr().Get(maxtime))
+            if prim.GetPrimPath().name.endswith("body"):
+                geomesh = UsdGeom.Mesh(prim)
+                timesamples = geomesh.GetPointsAttr().GetTimeSamples()
+                maxtime = max(timesamples)
+                b_verts = np.array(geomesh.GetPointsAttr().Get(maxtime))
+        sim_data[usd_filename.split('_')[-1][:-4]] =  {'cloth': c_verts, 'body': b_verts}
 
+    # just to read faces and indices
+    load_dir = "D:\\Simulation\\hermes\\hermes_local_data\\interpolated_data\\"
     anim = AnimationData(load_dir)
     anim.load_data()
-    body_points_anim_data = anim.get_animation_body_points()
-    body_verts, body_faces, body_indices = anim.get_body_mesh()
-    cloth_verts, cloth_faces, cloth_indices = anim.get_cloth_mesh()
+    _, body_faces, body_indices = anim.get_body_mesh()
+    _, cloth_faces, cloth_indices = anim.get_cloth_mesh()
 
     # viewer = MeshViewer()
 
-    for pose_idx in range(len(body_points_anim_data)):
+    for pose_idx in range(len(usd_files)):
 
         print("Simulating pose: ", pose_idx)
-        body_points_array_set = body_points_anim_data[pose_idx]
-
-        # further interpolate the body points array set by linearly interpolating n_interp steps between each pose
-        num_poses, num_points, num_dims = body_points_array_set.shape
-        n_interp = 2000
-        interpolated_body_points_array_set = np.zeros((n_interp, num_points, num_dims))
-        for i in range(num_points):
-            for j in range(num_dims):
-                interpolated_body_points_array_set[:, i, j] = np.interp(
-                    np.linspace(0, num_poses - 1, n_interp),
-                    np.arange(num_poses),
-                    body_points_array_set[:, i, j]
-                )
-        body_points_array_set = interpolated_body_points_array_set
-
-        print(body_points_array_set.shape)
-
+        cloth_verts = sim_data[usd_files[pose_idx].split('_')[-1][:-4]]['cloth']
+        body_verts = sim_data[usd_files[pose_idx].split('_')[-1][:-4]]['body']
 
         with wp.ScopedDevice(args.device):
             full_stage_path = os.path.join(args.out_dir, args.stage_path.split('.')[0] + f"_{pose_idx}.usd")
@@ -451,7 +453,6 @@ if __name__ == "__main__":
                 cloth_verts=cloth_verts.copy(),
                 cloth_faces=cloth_faces.copy(),
                 cloth_indices=cloth_indices.copy(),
-                body_points_array_set=body_points_array_set,
                 stage_path=full_stage_path,
                 integrator=args.integrator,
                 scale=args.scale,
@@ -459,10 +460,8 @@ if __name__ == "__main__":
                 position=wp.vec3(args.position[0], args.position[1], args.position[2]),
                 body_position=wp.vec3(args.body_position[0], args.body_position[1], args.body_position[2]),
                 density=args.density,
-                update_start_step_num=100,
-                final_relax_steps=10
                 )
-            for _i in range(datasim.update_start_step_num + len(body_points_array_set) + datasim.final_relax_steps):
+            for _i in range(1000):
                 datasim.step(step_num=_i)
                 print(f"Frame {_i+1}")
                 # cloth_verts = datasim.state_0.particle_q.numpy()
@@ -474,6 +473,7 @@ if __name__ == "__main__":
                 # viewer.set_mesh(v=cloth_verts, f=cloth_faces, c=cloth_colors, object_name="cloth")
                 # viewer.set_mesh(v=body_verts, f=body_faces, c=body_colors, object_name="body")
 
+        # breakpoint()
         datasim.render()
         datasim.renderer.save()
 
