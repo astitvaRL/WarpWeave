@@ -413,6 +413,7 @@ if __name__ == "__main__":
     # prepare existing simulation data
     usd_load_dir = "D:\\Simulation\\DATA\\PhysRig\\skirt\\usd\\"
     usd_files = os.listdir(usd_load_dir)
+
     sim_data = dict()
     for usd_filename in usd_files:
         stage = Usd.Stage.Open(f'{usd_load_dir}\\{usd_filename}')
@@ -445,7 +446,7 @@ if __name__ == "__main__":
         body_verts = sim_data[usd_files[pose_idx].split('_')[-1][:-4]]['body']
 
         with wp.ScopedDevice(args.device):
-            full_stage_path = os.path.join(args.out_dir, args.stage_path.split('.')[0] + f"_{pose_idx}.usd")
+            full_stage_path = os.path.join(args.out_dir, f'{usd_files[pose_idx]}')
             datasim = DataSimulator(
                 body_verts=body_verts.copy(),
                 body_faces=body_faces.copy(),

@@ -3,8 +3,8 @@ import os
 
 # --- User configuration ---
 blend_file = 'D:\\Simulation\\DATA\\Bender_Stuff\\BLEND_FILES\\usd_render.blend'
-usd_folder = 'C:\\Users\\astitva\\Desktop\\warp_out\\1750728074\\'
-output_folder = 'D:\\Simulation\\DATA\\Bender_Stuff\\RENDERS\\usd_render\\'
+usd_folder = 'D:\\Simulation\\DATA\\PhysRig\\skirt\\usd_refined\\'
+output_folder = 'D:\\Simulation\\DATA\\Bender_Stuff\\RENDERS\\usd_render_refined\\'
 os.makedirs(output_folder, exist_ok=True)
 # --------------------------
 
